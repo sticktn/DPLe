@@ -65,7 +65,7 @@ class TRT_model:
             for error in range(parser.num_errors):
                 print(parser.get_error(error))
         output_tensors = [network.get_output(i) for i in range(network.num_outputs)]
-        [network.unmark_output(tensor) for tensor in output_tensors]
+        # [network.unmark_output(tensor) for tensor in output_tensors]
         for tensor in output_tensors:
             identity_out_tensor = network.add_identity(tensor).get_output(0)
             identity_out_tensor.name = 'identity_{}'.format(tensor.name)
