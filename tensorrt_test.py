@@ -6,6 +6,7 @@ import tensorrt as trt
 import cv2
 import matplotlib.pyplot as plt
 from PIL import Image
+from trt_model.tensor_calibrator import TensorRT_Calibrator
 
 
 class TRT_model:
@@ -57,19 +58,19 @@ class TRT_model:
         builder = trt.Builder(trt_logger)
 
         EXPLICIT_BATCH = 1 << (int)(trt.NetworkDefinitionCreationFlag.EXPLICIT_BATCH)
-        network = builder.create_network(EXPLICIT_BATCH)
-        parser = trt.OnnxParser(network, trt_logger)
+        network = builder.create_network(EXPLICIT_BATCH) # 创建一个显式批次的网络
+        parser = trt.OnnxParser(network, trt_logger) # 将网络和解析器绑定在一起，这样解析器就知道要解析哪个网络了
         with open(self.onnx_model_path, 'rb') as f:
             flag = parser.parse(f.read())
         if not flag:
             for error in range(parser.num_errors):
                 print(parser.get_error(error))
-        output_tensors = [network.get_output(i) for i in range(network.num_outputs)]
+        output_tensors = [network.get_output(i) for i in range(network.num_outputs)] # 获取网络中所有的输出张量
         # [network.unmark_output(tensor) for tensor in output_tensors]
         for tensor in output_tensors:
             identity_out_tensor = network.add_identity(tensor).get_output(0)
             identity_out_tensor.name = 'identity_{}'.format(tensor.name)
-            network.mark_output(tensor=identity_out_tensor)
+            network.mark_output(tensor=identity_out_tensor) #将identity_out_tensor标记为网络的输出张量
         config: trt.IBuilderConfig = builder.create_builder_config()
         # config.set_memory_pool_limit(1 << 25)
         if self.mode == 'fp16':
@@ -96,9 +97,14 @@ class TRT_model:
             return self.runtime.deserialize_cuda_engine(f.read())
 
     def infer(self, input_data):
+        """
+        infer
+        :param input_data: tensor
+        :return: output tensor
+        """
         stream = cuda.Stream()
         for i in self.d_input:
-            cuda.memcpy_htod_async(i, input_data, stream)  # input data to cuda
+            cuda.memcpy_htod_async(i, input_data, stream)  # input data to cuda memory
 
         self.context.execute_async_v2(self.bindings, stream.handle, None)
 
@@ -110,9 +116,12 @@ class TRT_model:
         return self.output_data
 
 
-
 if __name__ == '__main__':
-    a = TRT_model(tensorrt_model_path='./trt_model/a2.trt',
-                  onnx_model_path='./onnx_model/two_label_classify_batch1.onnx')
+    a = TRT_model(tensorrt_model_path='./trt_model/a2_int8.trt',
+                  onnx_model_path='./onnx_model/two_label_classify_batch1.onnx',
+                  mode='int8',
+                  trt_int8_calibrator=TensorRT_Calibrator(input_shape=(1, 3, 224, 224),
+                                                          calibrator_image_dir='./images/cali_images',
+                                                          calibrator_cache_path='./images/cache/int8mode.cache'))
     # a = two_label_model_trt('trt_model/a1.trt')
     print(a.infer(np.random.randn(1, 3, 224, 224).astype(np.float32)))
