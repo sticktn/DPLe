@@ -67,10 +67,10 @@ class TRT_model:
                 print(parser.get_error(error))
         output_tensors = [network.get_output(i) for i in range(network.num_outputs)] # 获取网络中所有的输出张量
         # [network.unmark_output(tensor) for tensor in output_tensors]
-        for tensor in output_tensors:
-            identity_out_tensor = network.add_identity(tensor).get_output(0)
-            identity_out_tensor.name = 'identity_{}'.format(tensor.name)
-            network.mark_output(tensor=identity_out_tensor) #将identity_out_tensor标记为网络的输出张量
+        # for tensor in output_tensors:
+        #     identity_out_tensor = network.add_identity(tensor).get_output(0)
+        #     identity_out_tensor.name = 'identity_{}'.format(tensor.name)
+        #     network.mark_output(tensor=identity_out_tensor) #将identity_out_tensor标记为网络的输出张量
         config: trt.IBuilderConfig = builder.create_builder_config()
         # config.set_memory_pool_limit(1 << 25)
         if self.mode == 'fp16':

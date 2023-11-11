@@ -1,7 +1,5 @@
 import numpy as np
 import onnxruntime
-import numpy
-import cv2
 
 class ONNX_Engine:
     def __init__(self,onnx_model_path):
