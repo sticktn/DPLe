@@ -169,5 +169,8 @@ class yolo_onnx_engine(ONNX_Engine):
 if __name__ == "__main__":
     onnx_engine = yolo_onnx_engine("../onnx_model/yolov8x.onnx")
 
-    output = onnx_engine.inference("../bus.jpg")
+    output = onnx_engine.inference("../bird.jpg")
+    cv2.imshow("o",output)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
     print()

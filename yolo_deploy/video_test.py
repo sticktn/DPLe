@@ -1,9 +1,13 @@
 import cv2
 import time
 from yolo_onnx import yolo_onnx_engine
+from yolo_trt_model import YOLO_trt_model
 
-onnx_engine = yolo_onnx_engine("../onnx_model/yolov8x.onnx")
-video_path = "./videoplayback2.mp4"
+# engine = yolo_onnx_engine("../onnx_model/yolov8x.onnx")
+engine = YOLO_trt_model("../trt_model/yolov8x_32.trt", "../onnx_model/yolov8x.onnx",
+                          mode="fp32", )
+# video_path = "http://192.168.1.103:4747/video"
+video_path = "/media/fwq/US100 1TB/视频/2023-10-10/00000005092000000.mp4"
 
 cap = cv2.VideoCapture(video_path)
 
@@ -17,7 +21,7 @@ while cap.isOpened():
     ret, frame = cap.read()
 
     # 模型推理
-    frame = onnx_engine.inference(frame)
+    frame = engine.infer(frame)
 
     # 显示结果帧
     cv2.imshow('frame', frame)
