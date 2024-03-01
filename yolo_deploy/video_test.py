@@ -1,13 +1,14 @@
 import cv2
 import time
+from yolo_deploy.yolo_trt_model import YOLO_trt_model
 from yolo_onnx import yolo_onnx_engine
-from yolo_trt_model import YOLO_trt_model
 
 # engine = yolo_onnx_engine("../onnx_model/yolov8x.onnx")
-engine = YOLO_trt_model("../trt_model/yolov8x_32.trt", "../onnx_model/yolov8x.onnx",
+engine = YOLO_trt_model("../trt_model/yolov8x_8.trt", "../onnx_model/yolov8x.onnx",
                           mode="fp32", )
 # video_path = "http://192.168.1.103:4747/video"
-video_path = "/media/fwq/US100 1TB/视频/2023-10-10/00000005092000000.mp4"
+video_path = "rtsp://8.140.194.250:8554/rtp/61011300490000000001_34020000001320000001"
+# video_path = "/opt/temp/video/00000000210000000.mp4"
 
 cap = cv2.VideoCapture(video_path)
 
