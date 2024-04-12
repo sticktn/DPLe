@@ -15,6 +15,21 @@ coco_class_names = ['person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus',
                     'potted plant', 'bed', 'dining table', 'toilet', 'tv', 'laptop', 'mouse', 'remote', 'keyboard',
                     'cell phone', 'microwave', 'oven', 'toaster', 'sink', 'refrigerator', 'book', 'clock', 'vase',
                     'scissors', 'teddy bear', 'hair drier', 'toothbrush']
+coco_class_names = [
+    "safety_helmet",
+    "fuel_tanker",
+    "car",
+    "truck",
+    "other_vehicle",
+    "fire_extinguisher",
+    "fire_blanket",
+    "Calling",
+    "smoking",
+    "smoke",
+    "fire",
+    "person",
+
+]
 
 
 class ONNX_Engine:
@@ -39,8 +54,8 @@ class ONNX_Engine:
         for _input_tensor, _input_name in zip(input_tensor, self.input_names):
             input_dict[_input_name] = _input_tensor
         outputs = self.session.run(self.output_names, input_dict)
-        for i in np.arange(len(outputs)):
-            outputs[i] = np.reshape(outputs[i], self.output_shapes[i])
+        # for i in np.arange(len(outputs)):
+        #     outputs[i] = np.reshape(outputs[i], self.output_shapes[i])
         return outputs
 
 
@@ -70,17 +85,6 @@ class yolo_onnx_engine(ONNX_Engine):
         image_resize = np.transpose(image_resize, [2, 0, 1])
         return [np.expand_dims(image_resize, 0)]
 
-    def std_output(self, pred):
-        """
-        将（1，84，8400）处理成（8400， 85）  85= box:4  conf:1 cls:80
-        """
-        pred = np.squeeze(pred)  # 因为只是推理，所以没有Batch
-        pred = np.transpose(pred, (1, 0))
-        pred_class = pred[..., 4:]
-        pred_conf = np.max(pred_class, axis=-1)
-        pred = np.insert(pred, 4, pred_conf, axis=-1)
-        return pred  # 8400 * 85
-
     def xywh2xyxy(self, x):
         """
         将xywh转换为左上角点和左下角点
@@ -96,81 +100,60 @@ class yolo_onnx_engine(ONNX_Engine):
 
         return y
 
-    def nms(self, dets, thresh):
-        # 边界框的坐标
-        dets = dets[dets[:, 4] > 0.3]
-        dets = self.xywh2xyxy(dets)
-        x1 = dets[:, 0]  # 所有行第一列
-        y1 = dets[:, 1]  # 所有行第二列
-        x2 = dets[:, 2]  # 所有行第三列
-        y2 = dets[:, 3]  # 所有行第四列
-        # 计算边界框的面积
-        areas = (y2 - y1 + 1) * (x2 - x1 + 1)  # (第四列 - 第二列 + 1) * (第三列 - 第一列 + 1)
-        # 执行度，包围盒的信心分数
-        cls_index = np.argmax(dets[:, 5:], axis=-1)
-        scores = dets[:, 4]  # 所有行第五列
+    def nms(self, input_image, confidence_thres, iou_thres):
+        outputs = np.transpose(np.squeeze(input_image[0]))
+        rows = outputs.shape[0]
+        boxes = []
+        scores = []
+        class_ids = []
+        for i in range(rows):
+            # Extract the class scores from the current row
+            classes_scores = outputs[i][4:]
+            # Find the maximum score among the class scores
+            max_score = np.amax(classes_scores)
+            # If the maximum score is above the confidence threshold
+            if max_score >= confidence_thres:
+                # Get the class ID with the highest score
+                class_id = np.argmax(classes_scores)
+                # Extract the bounding box coordinates from the current row
+                x, y, w, h = outputs[i][0], outputs[i][1], outputs[i][2], outputs[i][3]
+                # Calculate the scaled coordinates of the bounding box
+                left = int((x - w / 2))
+                top = int((y - h / 2))
+                width = int(w)
+                height = int(h)
+                # Add the class ID, score, and box coordinates to the respective lists
+                class_ids.append(class_id)
+                scores.append(max_score)
+                boxes.append([left, top, width, height])
+        indices = cv2.dnn.NMSBoxes(boxes, scores, confidence_thres, iou_thres)
 
-        keep = []  # 保留
-        keep_cls = []
-
-        # 按边界框的置信度得分排序   尾部加上[::-1] 倒序的意思 如果没有[::-1] argsort返回的是从小到大的
-        index = scores[scores > 0.5].argsort()[::-1]  # 对所有行的第五列进行从大到小排序，返回索引值
-
-        # 迭代边界框
-        while index.size > 0:  # 6 > 0,      3 > 0,      2 > 0
-            i = index[0]  # every time the first is the biggst, and add it directly每次第一个是最大的，直接加进去
-            keep.append(i)  # 保存
-            # 计算并集上交点的纵坐标（IOU）
-            keep_cls.append(cls_index[i])
-            x11 = np.maximum(x1[i], x1[index[1:]])  # calculate the points of overlap计算重叠点
-            y11 = np.maximum(y1[i], y1[index[1:]])  # index[1:] 从下标为1的数开始，直到结束
-            x22 = np.minimum(x2[i], x2[index[1:]])
-            y22 = np.minimum(y2[i], y2[index[1:]])
-
-            # 计算并集上的相交面积
-            w = np.maximum(0, x22 - x11 + 1)  # the weights of overlap重叠权值、宽度
-            h = np.maximum(0, y22 - y11 + 1)  # the height of overlap重叠高度
-            overlaps = w * h  # 重叠部分、交集
-
-            # IoU：intersection-over-union的本质是搜索局部极大值，抑制非极大值元素。即两个边界框的交集部分除以它们的并集。
-            #          重叠部分 / （面积[i] + 面积[索引[1:]] - 重叠部分）
-            ious = overlaps / (areas[i] + areas[index[1:]] - overlaps)  # 重叠部分就是交集，iou = 交集 / 并集
-            # print("ious", ious)
-            #               ious <= 0.7
-            idx = np.where(ious <= thresh)[0]  # 判断阈值
-            # print("idx", idx)
-            index = index[idx + 1]  # because index start from 1 因为下标从1开始
-        return dets, keep, keep_cls  # 返回保存的值
+        return boxes, scores, class_ids, indices
 
     def inference(self, image_path):
         input_tensor = self.preprocess(image_path)
         pred = super().inference(input_tensor)
-        pred = self.std_output(pred)
-        pred, keep, keep_cls = self.nms(pred, thresh=0.5)
-        return self.postpocess(pred, keep, keep_cls)
+        boxes, scores, class_ids, indices = self.nms(pred, 0.25, 0.7)
+        return self.p(boxes, indices, class_ids, scores)
 
-    def postpocess(self, pred, keep, keep_cls):
-
-        for i, j in zip(keep, keep_cls):
-            x1, y1, x2, y2 = pred[i][:4]
-            score = pred[i][4]
-            cv2.rectangle(self.image, (int(x1 * self.w_w), int(y1 * self.h_w)),
-                          (int(x2 * self.w_w), int(y2 * self.h_w)),
-                          (0, 0, 255), 2)
-            cv2.putText(self.image, "{}:{:.2f}".format(coco_class_names[j], score),
-                        (int(x1 * self.w_w), int(y1 * self.h_w)),
+    def postpocess(self, boxes, indices, class_ids, scores):
+        for i in indices:
+            left, top, width, height = boxes[i]
+            cv2.rectangle(self.image, (int(left * self.w_w), int(top * self.h_w)),
+                          (int((left + width) * self.w_w), int((top + height) * self.h_w)), (0, 255, 0), 2)
+            cv2.putText(self.image, "{}:{:.2f}".format(coco_class_names[class_ids[i]], scores[i]),
+                        (int(left * self.w_w), int(top * self.h_w)),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 155, 255), 2)
-        # cv2.imshow("a", self.image)
-        # cv2.waitKey(0)
-        # cv2.destroyAllWindows()
+
         return self.image
 
 
 if __name__ == "__main__":
-    onnx_engine = yolo_onnx_engine("../onnx_model/yolov8x.onnx")
+    onnx_engine = yolo_onnx_engine("/opt/python_work/jyz_pro/models/best.onnx")
 
-    output = onnx_engine.inference("../bird.jpg")
-    cv2.imshow("o",output)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
+    output = onnx_engine.inference("/opt/python_work/jyz_pro/frame_1140.jpg")
+    cv2.imwrite("output/aaa.jpg", output)
+    # cv2.imshow("o", output)
+    # cv2.waitKey(0)
+    # cv2.destroyAllWindows()
     print()
