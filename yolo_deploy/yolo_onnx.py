@@ -1,6 +1,6 @@
+import cv2
 import numpy as np
 import onnxruntime
-import cv2
 
 coco_class_names = ['person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus', 'train', 'truck', 'boat',
                     'traffic light',
@@ -15,21 +15,22 @@ coco_class_names = ['person', 'bicycle', 'car', 'motorcycle', 'airplane', 'bus',
                     'potted plant', 'bed', 'dining table', 'toilet', 'tv', 'laptop', 'mouse', 'remote', 'keyboard',
                     'cell phone', 'microwave', 'oven', 'toaster', 'sink', 'refrigerator', 'book', 'clock', 'vase',
                     'scissors', 'teddy bear', 'hair drier', 'toothbrush']
-coco_class_names = [
-    "safety_helmet",
-    "fuel_tanker",
-    "car",
-    "truck",
-    "other_vehicle",
-    "fire_extinguisher",
-    "fire_blanket",
-    "Calling",
-    "smoking",
-    "smoke",
-    "fire",
-    "person",
 
-]
+
+# coco_class_names = [
+#     "safety_helmet",
+#     "fuel_tanker",
+#     "car",
+#     "truck",
+#     "other_vehicle",
+#     "fire_extinguisher",
+#     "fire_blanket",
+#     "Calling",
+#     "smoking",
+#     "smoke",
+#     "fire",
+#     "person",
+# ]
 
 
 class ONNX_Engine:
@@ -68,6 +69,24 @@ class yolo_onnx_engine(ONNX_Engine):
         self.h_w = 1080 / 640
         self.w_w = 810 / 640
 
+    def letterbox(self, img, new_shape=(640, 640), color=(114, 114, 114)):
+        shape = img.shape[:2]  # current shape [height, width]
+        if isinstance(new_shape, int):
+            new_shape = (new_shape, new_shape)
+
+        r = min(new_shape[0] / shape[0], new_shape[1] / shape[1])
+        new_unpad = int(round(shape[1] * r)), int(round(shape[0] * r))
+        dw, dh = new_shape[1] - new_unpad[0], new_shape[0] - new_unpad[1]
+        dw /= 2
+        dh /= 2
+
+        img = cv2.resize(img, new_unpad, interpolation=cv2.INTER_LINEAR)
+        top, bottom = int(round(dh - 0.1)), int(round(dh + 0.1))
+        left, right = int(round(dw - 0.1)), int(round(dw + 0.1))
+        img = cv2.copyMakeBorder(img, top, bottom, left, right, cv2.BORDER_CONSTANT, value=color)
+
+        return img, r, top, left
+
     def preprocess(self, image_path):
         if type(image_path) is str:
             image = cv2.imread(image_path)
@@ -78,7 +97,8 @@ class yolo_onnx_engine(ONNX_Engine):
         self.h_w = h / self.input_H
         self.w_w = w / self.input_W
         image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
-        image_resize = cv2.resize(image, dsize=(self.input_W, self.input_H))
+        image_resize, self.scale, self.pad_top, self.pad_left = self.letterbox(image)
+        # image_resize = cv2.resize(image, dsize=(self.input_W, self.input_H))
 
         image_resize = image_resize.astype(np.float32)
         image_resize /= 255
@@ -134,26 +154,35 @@ class yolo_onnx_engine(ONNX_Engine):
         input_tensor = self.preprocess(image_path)
         pred = super().inference(input_tensor)
         boxes, scores, class_ids, indices = self.nms(pred, 0.25, 0.7)
-        return self.p(boxes, indices, class_ids, scores)
+        return self.postpocess(boxes, indices, class_ids, scores)
 
     def postpocess(self, boxes, indices, class_ids, scores):
         for i in indices:
             left, top, width, height = boxes[i]
-            cv2.rectangle(self.image, (int(left * self.w_w), int(top * self.h_w)),
-                          (int((left + width) * self.w_w), int((top + height) * self.h_w)), (0, 255, 0), 2)
+
+            # x1 = int(left * self.w_w)
+            # y1 = int(top * self.h_w)
+            # x2 = int((left + width) * self.w_w)
+            # y2 = int((top + height) * self.h_w)
+
+            x1 = int((left - self.pad_left)/self.scale)
+            y1 = int((top - self.pad_top)/self.scale)
+            x2 = int((left + width-self.pad_left) / self.scale)
+            y2 = int((top + height-self.pad_top) / self.scale)
+            cv2.rectangle(self.image, (x1, y1),(x2, y2), (0, 255, 0), 2)
             cv2.putText(self.image, "{}:{:.2f}".format(coco_class_names[class_ids[i]], scores[i]),
-                        (int(left * self.w_w), int(top * self.h_w)),
+                        (x1, y1),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.75, (255, 155, 255), 2)
 
         return self.image
 
 
 if __name__ == "__main__":
-    onnx_engine = yolo_onnx_engine("/opt/python_work/jyz_pro/models/best.onnx")
+    onnx_engine = yolo_onnx_engine("/opt/github_clone/DPLe/onnx_model/jyz.onnx")
 
-    output = onnx_engine.inference("/opt/python_work/jyz_pro/frame_1140.jpg")
-    cv2.imwrite("output/aaa.jpg", output)
-    # cv2.imshow("o", output)
-    # cv2.waitKey(0)
-    # cv2.destroyAllWindows()
+    output = onnx_engine.inference("/opt/github_clone/datasets/jyz_fulful/images/test/smoke_fire_57.jpg")
+    # cv2.imwrite("output/aaa.jpg", output)
+    cv2.imshow("o", output)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
     print()
